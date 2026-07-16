@@ -91,8 +91,14 @@ func (p *proxy) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var nsk *types.NoSuchKey
 		var nf *types.NotFound
+		var nm *types.NotModified
 		if errors.As(err, &nsk) || errors.As(err, &nf) {
 			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if errors.As(err, &nm) {
+			// S3 returned 304 Not Modified - pass it through to client
+			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 		log.Printf("get object %q: %v", key, err)
