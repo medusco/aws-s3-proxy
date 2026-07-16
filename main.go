@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 type proxy struct {
@@ -91,16 +92,20 @@ func (p *proxy) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var nsk *types.NoSuchKey
 		var nf *types.NotFound
-		var nm *types.NotModified
 		if errors.As(err, &nsk) || errors.As(err, &nf) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		if errors.As(err, &nm) {
-			// S3 returned 304 Not Modified - pass it through to client
-			w.WriteHeader(http.StatusNotModified)
-			return
+
+		// Check if this is a 304 Not Modified response
+		var ae smithy.APIError
+		if errors.As(err, &ae) {
+			if ae.ErrorCode() == "NotModified" {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 		}
+
 		log.Printf("get object %q: %v", key, err)
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
