@@ -22,6 +22,7 @@ type proxy struct {
 	client       *s3.Client
 	bucket       string
 	cacheControl string
+	corsOrigin   string
 }
 
 func main() {
@@ -32,6 +33,7 @@ func main() {
 	secretKey := mustEnv("AWS_SECRET_ACCESS_KEY")
 	forcePathStyle := envOr("S3_FORCE_PATH_STYLE", "false") == "true"
 	cacheControl := envOr("CACHE_CONTROL", "public, max-age=300")
+	corsOrigin := envOr("ACCESS_CONTROL_ALLOW_ORIGIN", "*")
 	port := envOr("PORT", "8080")
 
 	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
@@ -47,10 +49,18 @@ func main() {
 		o.UsePathStyle = forcePathStyle
 	})
 
-	p := &proxy{client: client, bucket: bucket, cacheControl: cacheControl}
+	p := &proxy{
+		client:       client,
+		bucket:       bucket,
+		cacheControl: cacheControl,
+		corsOrigin:   corsOrigin,
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		if p.corsOrigin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", p.corsOrigin)
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -68,8 +78,19 @@ func main() {
 }
 
 func (p *proxy) handle(w http.ResponseWriter, r *http.Request) {
+	if p.corsOrigin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", p.corsOrigin)
+	}
+
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "If-None-Match, If-Match, Range")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
