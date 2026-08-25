@@ -82,9 +82,17 @@ func (p *proxy) handle(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", p.corsOrigin)
 	}
 
+	// Handle CORS preflight requests
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "If-None-Match, If-Match, Range")
+		
+		// Reflect requested headers (e.g. sentry-trace, baggage, authorization) back to the browser
+		if reqHeaders := r.Header.Get("Access-Control-Request-Headers"); reqHeaders != "" {
+			w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
+		} else {
+			w.Header().Set("Access-Control-Allow-Headers", "If-None-Match, If-Match, Range, sentry-trace, baggage")
+		}
+
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
