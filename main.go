@@ -58,9 +58,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		if p.corsOrigin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", p.corsOrigin)
-		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -68,7 +65,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           p.corsMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("listening on :%s bucket=%s endpoint=%s", port, bucket, endpoint)
@@ -77,26 +74,32 @@ func main() {
 	}
 }
 
-func (p *proxy) handle(w http.ResponseWriter, r *http.Request) {
-	if p.corsOrigin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", p.corsOrigin)
-	}
-
-	// Handle CORS preflight requests
-	if r.Method == http.MethodOptions {
-		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-		
-		// Reflect requested headers (e.g. sentry-trace, baggage, authorization) back to the browser
-		if reqHeaders := r.Header.Get("Access-Control-Request-Headers"); reqHeaders != "" {
-			w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
-		} else {
-			w.Header().Set("Access-Control-Allow-Headers", "If-None-Match, If-Match, Range, sentry-trace, baggage")
+// corsMiddleware guarantees CORS headers are injected on EVERY response,
+// including errors (404, 502) and OPTIONS preflights.
+func (p *proxy) corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p.corsOrigin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", p.corsOrigin)
 		}
 
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+			
+			if reqHeaders := r.Header.Get("Access-Control-Request-Headers"); reqHeaders != "" {
+				w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
+			} else {
+				w.Header().Set("Access-Control-Allow-Headers", "If-None-Match, If-Match, Range, sentry-trace, baggage")
+			}
 
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (p *proxy) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
