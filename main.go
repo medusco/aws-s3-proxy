@@ -138,16 +138,11 @@ func (p *proxy) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Check if this is a 304 Not Modified response
+		// S3 reports a satisfied precondition as an error, not a response.
+		// Without this the forwarded If-None-Match / If-Match below turn every
+		// cache revalidation into a 502.
 		var ae smithy.APIError
 		if errors.As(err, &ae) {
-			if ae.ErrorCode() == "NotModified" {
-				w.WriteHeader(http.StatusNotModified)
-				return
-        
-      // S3 reports a satisfied precondition as an error, not a response.
-      // Without this the forwarded If-None-Match / If-Match below turn every
-      // cache revalidation into a 502.		
 			switch ae.ErrorCode() {
 			case "NotModified":
 				// A 304 carries the validators but no body.
